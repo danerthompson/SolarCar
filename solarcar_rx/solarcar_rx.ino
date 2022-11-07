@@ -1,7 +1,6 @@
 #include <RH_ASK.h>
 #include <SPI.h> // Not actualy used but needed to compile
 
-#hello
 RH_ASK driver;
 
 int motor1;
