@@ -1,71 +1,93 @@
-#include <RH_ASK.h>
-#include <SPI.h> // Not actualy used but needed to compile
+// Arduino nano receiver code to control RC car using nRF24L01+PA+LNA transceiver
+// and TB6612FNG motor driver
+// Made for K-State Solar Club
 
-#hello
-RH_ASK driver;
+#include <SPI.h>
+#include <RF24.h>
+#include <nRF24L01.h>
+#include "printf.h"
 
-int motor1;
-int motor2;
-unsigned long timeout;
+RF24 radio(9, 8); // CE, CSN
+const byte address[10] = "ADDRESS01";
 
-void setup()
-{
-    timeout = millis();
-    pinMode(5, OUTPUT);
-    pinMode(6, OUTPUT);
-    Serial.begin(9600);  // Debugging only
-    if (!driver.init())
-         Serial.println("init failed");
+// These pins are used to control motor direction
+#define AIN1 A5
+#define AIN2 A4
+#define BIN1 A3
+#define BIN2 A2
+#define leftMotorPin 5
+#define rightMotorPin 6
+
+unsigned long timeout;  // Timer for timeout caused by lack of data from radios
+
+
+void setup() {
+
+  // motor related pins
+  pinMode(AIN1, OUTPUT);
+  pinMode(AIN2, OUTPUT);
+  pinMode(BIN1, OUTPUT);
+  pinMode(BIN2, OUTPUT);
+  pinMode(leftMotorPin, OUTPUT);
+  pinMode(rightMotorPin, OUTPUT);
+  
+  Serial.begin(9600);
+
+  // Set up nRF24L01
+  radio.begin();
+  radio.setAutoAck(false);
+  radio.openReadingPipe(0, address);
+  radio.setDataRate(RF24_250KBPS);
+  radio.setChannel(108);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.startListening();
+  printf_begin();
+  radio.printDetails();
+
+  timeout = millis();
 }
 
-void loop()
-{
-    uint8_t buf[14];
-    uint8_t buflen = sizeof(buf);
-    if (driver.recv(buf, &buflen)) // Non-blocking
-    {
-      int i;
-      // Message with a good checksum received, dump it.
-      //Serial.print("Message: ");
-      //Serial.println((char*)buf); 
-      //Serial.println(buf[7]);
-      String data = (char*)buf;
+void loop() {
+  if (radio.available()) {
+    Serial.println("Data received");
+    int txt[4] = {};
+    radio.read(&txt, sizeof(txt));
 
-      int comma;
-      int pound;
-      for (int j = 0; j < data.length(); j++) {
-        if (data[j] == ',')
-          comma = j;
-
-        if (data[j] == '#') {
-          pound = j;
-          break;
-        }
-      }
-
-      String motor1String = data.substring(0,comma);
-      String motor2String = data.substring(comma+1, pound);
-
-      motor1 = abs(motor1String.toInt());
-      motor2 = abs(motor2String.toInt());
-
-      motor1 = map(motor1, 0, 512, 0, 255);
-      motor2 = map(motor2, 0, 512, 0, 255);
-
-      if ((motor1 <= 255 && motor1 >= 0) && (motor1 <= 255 && motor1 >= 0)) {
-        analogWrite(5, motor1);
-        analogWrite(6, motor2);
-      }
-      timeout = millis();
-      
-      Serial.print("Right: ");
-      Serial.print(motor1);
-      Serial.print(" Left: ");
-      Serial.println(motor2);
-              
+    // Check for direction of left motor
+    if (txt[0] < 0) {
+      digitalWrite(AIN1, HIGH);
+      digitalWrite(AIN2, LOW);
     }
-    if (millis() - timeout >= 1000) {
-      analogWrite(5, 0);
-      analogWrite(6, 0);
+    else {
+      digitalWrite(AIN1, LOW);
+      digitalWrite(AIN2, HIGH);
     }
+    // Check for direction of right motor
+    if (txt[1] < 0) {
+      digitalWrite(BIN1, HIGH);
+      digitalWrite(BIN2, LOW);
+    }
+    else {
+      digitalWrite(BIN1, LOW);
+      digitalWrite(BIN2, HIGH);
+    }
+
+    // Write motor vals to PWM pins
+    analogWrite(leftMotorPin, map(abs(txt[0]), 0, 512, 0, 255));
+    analogWrite(rightMotorPin, map(abs(txt[1]), 0, 512, 0, 255));
+    timeout = millis();
+  } // end of if radio.available()
+  
+  else {
+    if (millis() - timeout >= 500) {  // If it's been 500ms since last radio transmission
+      // should put motor driver into "stop" mode
+      digitalWrite(AIN1, LOW);
+      digitalWrite(AIN2, LOW);
+      digitalWrite(BIN1, LOW);
+      digitalWrite(BIN2, LOW);
+      analogWrite(leftMotorPin, 255);
+      analogWrite(rightMotorPin, 255);
+    }
+  } // end of timeout 
+  
 }
